@@ -1,221 +1,226 @@
-# Домашнее задание «Сетевое взаимодействие в K8S. Часть 1»
-
-## Цель задания
-
-В тестовой среде Kubernetes необходимо обеспечить доступ к приложению, установленному в предыдущем ДЗ и состоящему из двух контейнеров, по разным портам в разные контейнеры как внутри кластера, так и снаружи.
+# Домашнее задание: Сетевое взаимодействие в Kubernetes
 
 ## Выполненные задачи
 
-### Задача 1. Создание Deployment и обеспечение доступа к контейнерам приложения по разным портам из другого Pod внутри кластера
+### Задача 1: Настройка Service (ClusterIP и NodePort)
 
-#### 1. Создание Deployment приложения
+#### 1. Создание Deployment с двумя контейнерами
+**Манифест:** `deployment-multi-container.yaml`
 
-Создан Deployment с двумя контейнерами (nginx и multitool) и количеством реплик 3 шт.
-
-**Манифест Deployment** (`k8s-manifests/deployment.yaml`):
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx-multitool-app
-  labels:
-    app: nginx-multitool
+  name: multi-container-app
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: nginx-multitool
+      app: multi-container-app
   template:
     metadata:
       labels:
-        app: nginx-multitool
+        app: multi-container-app
     spec:
       containers:
       - name: nginx
-        image: alpine:3.19
-        ports:
-        - containerPort: 80
-        command: ["sh", "-c", "apk add --no-cache python3 && python3 -m http.server 80"]
-        resources:
-          limits:
-            cpu: 100m
-            memory: 128Mi
-          requests:
-            cpu: 50m
-            memory: 64Mi
-      - name: multitool
-        image: alpine:3.19
+        image: bitnami/nginx
         ports:
         - containerPort: 8080
-        command: ["sh", "-c", "apk add --no-cache python3 && cd /tmp && echo 'Multitool response' > index.html && python3 -m http.server 8080"]
-        resources:
-          limits:
-            cpu: 100m
-            memory: 128Mi
-          requests:
-            cpu: 50m
-            memory: 64Mi
+        env:
+        - name: NGINX_HTTP_PORT_NUMBER
+          value: "8080"
+      - name: multitool
+        image: wbitt/network-multitool
+        ports:
+        - containerPort: 8081
+        env:
+        - name: HTTP_PORT
+          value: "8081"
 ```
 
-#### 2. Создание Service для внутреннего доступа
+**Скриншот 1:** 
+![](image.png)
 
-Создан Service, который обеспечивает доступ внутри кластера до контейнеров приложения по портам:
-- 9001 → nginx:80
-- 9002 → multitool:8080
+#### 2. Создание ClusterIP Service
+**Манифест:** `service-clusterip.yaml`
 
-**Манифест Service** (`k8s-manifests/service.yaml`):
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx-multitool-service
-  labels:
-    app: nginx-multitool
+  name: multi-container-service
 spec:
+  type: ClusterIP
   selector:
-    app: nginx-multitool
+    app: multi-container-app
   ports:
   - name: nginx
     port: 9001
-    targetPort: 80
+    targetPort: 8080
     protocol: TCP
   - name: multitool
     port: 9002
-    targetPort: 8080
+    targetPort: 8081
     protocol: TCP
-  type: ClusterIP
 ```
 
-#### 3. Создание отдельного Pod для тестирования
+**Скриншот 2:** 
 
-Создан отдельный Pod с multitool для тестирования доступа.
+![](image%20copy.png)
 
-**Манифест тестового Pod** (`k8s-manifests/test-pod.yaml`):
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: test-multitool
-  labels:
-    app: test-multitool
-spec:
-  containers:
-  - name: multitool
-    image: wbitt/network-multitool:latest
-    command: ['sleep', '3600']
-    resources:
-      limits:
-        cpu: 100m
-        memory: 128Mi
-      requests:
-        cpu: 50m
-        memory: 64Mi
-  restartPolicy: Never
-```
+#### 3. Тестирование ClusterIP Service
 
-#### 4. Тестирование доступа внутри кластера
+![](image%20copy%202.png)
 
-**Результаты тестирования:**
+![](image%20copy%203.png)
 
-Доступ к nginx по порту 9001:
-```bash
-kubectl exec test-multitool -- wget -qO- nginx-multitool-service:9001
-```
-```
-<!DOCTYPE HTML>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Directory listing for /</title>
-</head>
-<body>
-<h1>Directory listing for /</h1>
-<hr>
-<ul>
-<li><a href="bin/">bin/</a></li>
-<li><a href="dev/">dev/</a></li>
-<li><a href="etc/">etc/</a></li>
-...
-</ul>
-<hr>
-</body>
-</html>
-```
+![](image%20copy%204.png)
 
-Доступ к multitool по порту 9002:
-```bash
-kubectl exec test-multitool -- wget -qO- nginx-multitool-service:9002
-```
-```
-Multitool response
-```
+#### 4. Создание NodePort Service
+**Манифест:** `service-nodeport.yaml`
 
-### Задача 2. Создание Service и обеспечение доступа к приложениям снаружи кластера
-
-#### 1. Создание NodePort Service
-
-Создан отдельный Service типа NodePort для внешнего доступа к nginx.
-
-**Манифест NodePort Service** (`k8s-manifests/nodeport-service.yaml`):
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx-nodeport-service
-  labels:
-    app: nginx-multitool
+  name: nginx-nodeport
 spec:
+  type: NodePort
   selector:
-    app: nginx-multitool
+    app: multi-container-app
   ports:
   - name: nginx
     port: 80
-    targetPort: 80
+    targetPort: 8080
     protocol: TCP
     nodePort: 30080
-  type: NodePort
 ```
 
-#### 2. Тестирование внешнего доступа
+![](image%20copy%205.png)
 
-NodePort Service назначен порт 30080 на узле.
+![](image%20copy%206.png) (проверка статуса NodePort сервиса)
 
-**Тестирование внешнего доступа через port-forward:**
-```bash
-kubectl port-forward svc/nginx-nodeport-service 8080:80
-curl http://localhost:8080
+Я попытался сделать port-forward для доступа к nodeport и вылетела ошибка, но доступ появился, видимо это связано с WSL винды, то есть на самом нем есть возможность nodeport порт увидеть, а винда не может, команда уходит, но ответ для винды некорректны, но все работает
+
+![](image%20copy%207.png)
+
+![](image%20copy%208.png)
+
+### Задача 2: Настройка Ingress
+
+#### 1. Создание frontend Deployment
+**Манифест:** `deployment-frontend.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: nginx
+        image: bitnami/nginx
+        ports:
+        - containerPort: 8080
+        env:
+        - name: NGINX_HTTP_PORT_NUMBER
+          value: "8080"
+```
+![](image%20copy%209.png)
+
+#### 2. Создание backend Deployment
+**Манифест:** `deployment-backend.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: multitool
+        image: wbitt/network-multitool
+        ports:
+        - containerPort: 8080
+        env:
+        - name: HTTP_PORT
+          value: "8080"
 ```
 
-Результат аналогичен внутреннему доступу - возвращается HTML страница с листингом директории.
+![](image%20copy%2010.png)
 
-## Структура файлов
+#### 3. Создание Services
+**Манифесты:** `service-frontend.yaml`, `service-backend.yaml`
 
+**Скриншот 11:** `kubectl apply -f service-frontend.yaml`
+**Скриншот 12:** `kubectl apply -f service-backend.yaml`
+
+![](image%20copy%2011.png)
+
+#### 4. Установка Ingress-контроллера
+**Скриншот 13:** `kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml`
+
+![](image%20copy%2012.png)
+
+#### 5. Создание Ingress
+**Манифест:** `ingress.yaml`
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-service
+            port:
+              number: 80
 ```
-kuber_hw_3/
-├── k8s-manifests/
-│   ├── deployment.yaml      # Deployment с двумя контейнерами
-│   ├── service.yaml         # ClusterIP Service для внутреннего доступа
-│   ├── test-pod.yaml        # Тестовый Pod
-│   └── nodeport-service.yaml # NodePort Service для внешнего доступа
-├── README.md                # Документация выполнения задания
-└── 1.4.md                   # Описание задания
-```
 
-## Выводы
+**Скриншот 14:** `kubectl apply -f ingress.yaml`
+![](image%20copy%2013.png)
 
-1. **Задача 1 выполнена успешно**: Создан Deployment с двумя контейнерами, Service для внутреннего доступа по разным портам, протестирован доступ из другого Pod как по IP, так и по доменному имени сервиса.
+#### 6. Тестирование Ingress
 
-2. **Задача 2 выполнена успешно**: Создан NodePort Service для внешнего доступа к nginx, продемонстрирован доступ снаружи кластера через port-forward.
+**Скриншот 16:** `curl http://localhost:8080/` (frontend)
 
-3. **Используемые технологии**:
-   - Kubernetes кластер в Docker Desktop
-   - Python HTTP Server для простого веб-сервера
-   - Alpine Linux как базовый образ
-   - kubectl для управления кластером
+![](image%20copy%2015.png)
 
-4. **Особенности реализации**:
-   - Вместо nginx использован Python HTTP Server из-за проблем с загрузкой образов
-   - Вместо multitool использован аналогичный Python сервер
-   - Для внешнего тестирования использован kubectl port-forward из-за особенностей Docker Desktop
+**Скриншот 17:** `curl http://localhost:8080/api` (backend)
 
-Все требования задания выполнены, доступ к контейнерам обеспечен по разным портам как внутри кластера, так и снаружи.
+![](image%20copy%2014.png)
